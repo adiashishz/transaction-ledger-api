@@ -5,7 +5,7 @@ A REST API for a simple transaction ledger. You can create accounts, post credit
 ## Requirements
 
 - Python 3.12 or newer
-- PostgreSQL 14 or newer, **or** Docker to run PostgreSQL in a container
+- PostgreSQL 14 or newer, **or** Docker with Compose v2 (the `docker compose` command) to run PostgreSQL in a container
 
 ## Run it locally
 
@@ -24,7 +24,7 @@ cd transaction-ledger-api
 cp .env.example .env               # Windows: copy .env.example .env
 ```
 
-The defaults work as they are with either option in step 3.
+The defaults work as they are with either option in step 3. If your PostgreSQL runs on another host or port, or you want different credentials, edit the `DB_*` values in `.env` **before** step 3.
 
 **3. Start PostgreSQL.** Pick one option:
 
@@ -34,8 +34,10 @@ The defaults work as they are with either option in step 3.
   docker compose up -d --wait
   ```
 
-  This starts PostgreSQL 17 using the database name, user and password from `.env`, and waits until it's ready. Data is kept in a Docker volume between runs.
-  - `docker compose down` stops it.
+  This starts PostgreSQL 17 using the database name, user and password from `.env`, and waits until it's ready. It's reachable from this machine only.
+  - **Already running PostgreSQL locally on port 5432?** Set `DB_PORT=5433` in `.env` first.
+  - The user, password and database are created only on the very first start. If you change them in `.env` later, run `docker compose down -v` and start again.
+  - `docker compose down` stops it, and keeps the data for next time.
   - `docker compose down -v` stops it and deletes the data.
 
 - **B. With your own PostgreSQL:** create the user and database once:
@@ -45,7 +47,7 @@ The defaults work as they are with either option in step 3.
   sudo -u postgres psql -c "CREATE DATABASE ledger OWNER ledger;"
   ```
 
-  On macOS or Windows, run the two SQL statements in `psql` as your Postgres superuser instead. `CREATEDB` lets the test runner create its own test database.
+  On macOS or Windows, run the two SQL statements in `psql` as your Postgres superuser instead. `CREATEDB` lets the test runner create its own test database. If you changed `DB_NAME`, `DB_USER` or `DB_PASSWORD` in `.env`, use the same values here.
 
 **4. Create a virtual environment and install the dependencies:**
 
@@ -154,7 +156,9 @@ docker-compose.yml          Optional PostgreSQL container
 
 - **Port 8000 is busy:** run `python manage.py runserver 8001` and use port 8001 in the URLs above.
 - **`docker compose up` fails with "address already in use" or "port is already allocated":** something else, usually a local PostgreSQL, is already using port 5432. Set `DB_PORT=5433` (or any free port) in `.env` and run the command again. Docker and Django both read that value.
-- **`migrate` fails with "password authentication failed" or "Ident authentication failed":** your PostgreSQL only allows OS-user logins over TCP. Change `ident` or `peer` to `scram-sha-256` on the `host` lines of `pg_hba.conf`, then restart PostgreSQL.
+- **`migrate` fails with "password authentication failed" or 'role "ledger" does not exist':**
+  - *With Docker (option A):* either `.env` changed after the database was first created (run `docker compose down -v`, then `docker compose up -d --wait`), or a local PostgreSQL is answering on the same port instead of the container. This can happen on macOS even when Docker started without errors; fix it with a different `DB_PORT`.
+  - *With your own PostgreSQL (option B), or "Ident authentication failed":* your PostgreSQL only allows OS-user logins over TCP. Change `ident` or `peer` to `scram-sha-256` on the `host` lines of `pg_hba.conf`, then restart PostgreSQL.
 
 ## Documentation
 

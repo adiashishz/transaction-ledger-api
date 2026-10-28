@@ -1,7 +1,8 @@
 # Optional: runs PostgreSQL for local development, for anyone without it installed.
-# The API itself runs natively (see README). Credentials come from the same DB_* values in .env
-# that Django uses, so both always agree. The postgres user is a superuser, so `manage.py test`
-# can create its test database.
+# The API itself runs natively (see README). The database name, user and password come from the
+# DB_* values in .env, the same ones Django reads. The image applies them only when the data volume
+# is first created, so after changing them run `docker compose down -v` to recreate it.
+# The port is published on localhost only, so the database isn't reachable from the network.
 services:
   db:
     image: postgres:17-alpine
@@ -10,11 +11,13 @@ services:
       POSTGRES_USER: ${DB_USER:-ledger}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-ledger}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # Check over TCP: during first-time setup the image runs a temporary server on the Unix socket
+      # only, and a socket check would report "ready" before connections from Django can succeed.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 3s
       retries: 15
