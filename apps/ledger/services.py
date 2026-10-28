@@ -3,11 +3,18 @@
 from django.db import IntegrityError, transaction
 from django.db.models import F
 
-from apps.ledger.exceptions import AccountNotFound, BalanceLimitExceeded, DuplicateTransaction, InsufficientBalance
-from apps.ledger.models import MAX_BALANCE, Account, Transaction, TransactionType
-from apps.ledger.serializers import TransactionSerializer
+from apps.ledger.exceptions import (
+    AccountNotFound,
+    BalanceLimitExceeded,
+    DuplicateTransaction,
+    DuplicateTransfer,
+    InsufficientBalance,
+)
+from apps.ledger.models import MAX_BALANCE, Account, Transaction, TransactionType, Transfer
+from apps.ledger.serializers import TransactionSerializer, TransferSerializer
 
 UNIQUE_REFERENCE_CONSTRAINT = "uniq_transaction_account_reference"
+UNIQUE_TRANSFER_REFERENCE_CONSTRAINT = "uniq_transfer_source_reference"
 
 
 def create_account(name):
@@ -20,8 +27,7 @@ def list_accounts():
 
 def get_account(account_id, lock=False):
     """Fetch an account. `lock=True` takes a row lock (SELECT ... FOR UPDATE); it must run inside a transaction."""
-    accounts = Account.objects.select_for_update() if lock else Account.objects
-    account = accounts.filter(pk=account_id).first()
+    account = _lock_row(account_id) if lock else Account.objects.filter(pk=account_id).first()
     if account is None:
         raise AccountNotFound(details={"account_id": str(account_id)})
     return account
@@ -50,10 +56,10 @@ def post_transaction(account_id, transaction_type, amount, reference_id, descrip
             if existing is not None:
                 raise _duplicate(existing)
 
-            if transaction_type == TransactionType.DEBIT and account.balance < amount:
-                raise _insufficient_balance(account.balance, amount)
-            if transaction_type == TransactionType.CREDIT and account.balance + amount > MAX_BALANCE:
-                raise _balance_limit_exceeded(account.balance, amount)
+            if transaction_type == TransactionType.DEBIT:
+                _check_can_debit(account, amount)
+            else:
+                _check_can_credit(account, amount)
 
             txn = Transaction.objects.create(
                 account=account,
@@ -72,30 +78,124 @@ def post_transaction(account_id, transaction_type, amount, reference_id, descrip
     return txn
 
 
+def create_transfer(from_account_id, to_account_id, amount, reference_id, description=""):
+    """Move money between two accounts as one atomic operation: a transfer record, a debit
+    leg on the source, a credit leg on the destination and both balance updates either all
+    commit or none do, so a partial transfer is impossible.
+
+    Both account rows are locked in sorted id order. Every transfer locks in the same order,
+    so two transfers in opposite directions (A→B and B→A) queue up instead of deadlocking.
+    """
+    try:
+        with transaction.atomic():
+            locked = {}
+            for account_id in sorted({from_account_id, to_account_id}):
+                locked[account_id] = _lock_row(account_id)
+            source, destination = locked[from_account_id], locked[to_account_id]
+            if source is None:
+                raise _transfer_account_not_found("Source", "from_account_id", from_account_id)
+            if destination is None:
+                raise _transfer_account_not_found("Destination", "to_account_id", to_account_id)
+
+            existing = source.transfers_out.filter(reference_id=reference_id).first()
+            if existing is not None:
+                raise _duplicate_transfer(existing)
+            # Both legs carry the transfer's reference_id, so it must be free on both accounts.
+            for account, role in ((source, "source"), (destination, "destination")):
+                existing_leg = _find_transaction(account, reference_id)
+                if existing_leg is not None:
+                    raise _duplicate(existing_leg, f"the {role} account")
+
+            _check_can_debit(source, amount)
+            _check_can_credit(destination, amount)
+
+            transfer = Transfer.objects.create(
+                from_account=source,
+                to_account=destination,
+                amount=amount,
+                reference_id=reference_id,
+                description=description,
+            )
+            legs = [
+                (source, TransactionType.DEBIT, f"Transfer to {destination.name}"),
+                (destination, TransactionType.CREDIT, f"Transfer from {source.name}"),
+            ]
+            for account, leg_type, default_description in legs:
+                Transaction.objects.create(
+                    account=account,
+                    type=leg_type,
+                    amount=amount,
+                    reference_id=reference_id,
+                    description=description or default_description,
+                    transfer=transfer,
+                )
+            _apply_balance_change(source, -amount)
+            _apply_balance_change(destination, amount)
+    except IntegrityError as exc:
+        # Backstop: unique constraints catch duplicates the lookups above missed.
+        constraint = _violated_constraint(exc)
+        if constraint == UNIQUE_TRANSFER_REFERENCE_CONSTRAINT:
+            existing = Transfer.objects.get(from_account_id=from_account_id, reference_id=reference_id)
+            raise _duplicate_transfer(existing) from exc
+        if constraint == UNIQUE_REFERENCE_CONSTRAINT:
+            for account_id, role in ((from_account_id, "source"), (to_account_id, "destination")):
+                existing_leg = Transaction.objects.filter(account_id=account_id, reference_id=reference_id).first()
+                if existing_leg is not None:
+                    raise _duplicate(existing_leg, f"the {role} account") from exc
+        raise
+    return transfer
+
+
+def _lock_row(account_id):
+    """SELECT ... FOR UPDATE on one account; None if it doesn't exist."""
+    return Account.objects.select_for_update().filter(pk=account_id).first()
+
+
 def _find_transaction(account, reference_id):
     return account.transactions.filter(reference_id=reference_id).first()
+
+
+def _check_can_debit(account, amount):
+    if account.balance < amount:
+        raise InsufficientBalance(
+            details={
+                "balance": f"{account.balance:.2f}",
+                "requested": f"{amount:.2f}",
+                "shortfall": f"{amount - account.balance:.2f}",
+            },
+        )
+
+
+def _check_can_credit(account, amount):
+    if account.balance + amount > MAX_BALANCE:
+        raise BalanceLimitExceeded(
+            details={
+                "balance": f"{account.balance:.2f}",
+                "requested": f"{amount:.2f}",
+                "max_balance": f"{MAX_BALANCE:.2f}",
+            },
+        )
 
 
 def _apply_balance_change(account, delta):
     Account.objects.filter(pk=account.pk).update(balance=F("balance") + delta)
 
 
-def _insufficient_balance(balance, amount):
-    return InsufficientBalance(
-        details={"balance": f"{balance:.2f}", "requested": f"{amount:.2f}", "shortfall": f"{amount - balance:.2f}"},
-    )
+def _transfer_account_not_found(role, field, account_id):
+    return AccountNotFound(f"{role} account not found.", details={"field": field, "account_id": str(account_id)})
 
 
-def _balance_limit_exceeded(balance, amount):
-    return BalanceLimitExceeded(
-        details={"balance": f"{balance:.2f}", "requested": f"{amount:.2f}", "max_balance": f"{MAX_BALANCE:.2f}"},
-    )
-
-
-def _duplicate(existing):
+def _duplicate(existing, owner="this account"):
     return DuplicateTransaction(
-        f"A transaction with reference_id '{existing.reference_id}' already exists for this account.",
+        f"A transaction with reference_id '{existing.reference_id}' already exists for {owner}.",
         details={"transaction": TransactionSerializer(existing).data},
+    )
+
+
+def _duplicate_transfer(existing):
+    return DuplicateTransfer(
+        f"A transfer with reference_id '{existing.reference_id}' already exists for the source account.",
+        details={"transfer": TransferSerializer(existing).data},
     )
 
 

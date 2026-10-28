@@ -60,6 +60,12 @@ class DuplicateTransaction(LedgerError):
     default_detail = "A transaction with this reference_id already exists for this account."
 
 
+class DuplicateTransfer(LedgerError):
+    status_code = status.HTTP_409_CONFLICT
+    error_code = "DUPLICATE_TRANSFER"
+    default_detail = "A transfer with this reference_id already exists for the source account."
+
+
 class InsufficientBalance(LedgerError):
     status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     error_code = "INSUFFICIENT_BALANCE"

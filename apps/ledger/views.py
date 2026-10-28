@@ -20,6 +20,8 @@ from apps.ledger.serializers import (
     TransactionCreateSerializer,
     TransactionPageSerializer,
     TransactionSerializer,
+    TransferCreateSerializer,
+    TransferSerializer,
 )
 
 ACCOUNT_ID_PARAMETER = OpenApiParameter("account_id", OpenApiTypes.UUID, OpenApiParameter.PATH)
@@ -139,3 +141,30 @@ class AccountTransactionsView(APIView):
             description=data["description"],
         )
         return Response(TransactionSerializer(txn).data, status=status.HTTP_201_CREATED)
+
+
+class TransferCreateView(APIView):
+    @extend_schema(
+        tags=["Transfers"],
+        summary="Transfer money between accounts",
+        description=(
+            "Debits the source and credits the destination as one atomic operation: either both "
+            "happen or neither does. Each side is recorded as a transaction (`debit_transaction`, "
+            "`credit_transaction`) that also appears in that account's history. `reference_id` is "
+            "unique per source account, and must not already be used on either account."
+        ),
+        request=TransferCreateSerializer,
+        responses={
+            201: TransferSerializer,
+            400: ErrorResponseSerializer,
+            404: ErrorResponseSerializer,
+            409: ErrorResponseSerializer,
+            415: ErrorResponseSerializer,
+            422: ErrorResponseSerializer,
+        },
+    )
+    def post(self, request):
+        serializer = TransferCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transfer = services.create_transfer(**serializer.validated_data)
+        return Response(TransferSerializer(transfer).data, status=status.HTTP_201_CREATED)

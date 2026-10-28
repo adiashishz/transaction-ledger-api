@@ -35,7 +35,7 @@ class AddTransactionTests(TransactionTestCase):
         self.assertEqual(response.status_code, 201)
         body = response.json()
         self.assertEqual(
-            set(body), {"id", "account_id", "type", "amount", "description", "reference_id", "created_at"}
+            set(body), {"id", "account_id", "type", "amount", "description", "reference_id", "transfer_id", "created_at"}
         )
         self.assertEqual(body["account_id"], str(self.account.id))
         self.assertEqual((body["type"], body["amount"], body["description"]), ("credit", "50.00", "Top-up"))

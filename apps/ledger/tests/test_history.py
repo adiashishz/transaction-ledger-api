@@ -45,7 +45,7 @@ class HistoryTests(HistoryTestCase):
         self.assertEqual(self.refs(response), ["REF-003", "REF-002", "REF-001"])
         self.assertEqual(
             set(response.json()["data"][0]),
-            {"id", "account_id", "type", "amount", "description", "reference_id", "created_at"},
+            {"id", "account_id", "type", "amount", "description", "reference_id", "transfer_id", "created_at"},
         )
 
     def test_same_timestamp_is_ordered_by_id(self):
