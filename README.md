@@ -14,7 +14,7 @@ Run these in order from a terminal.
 **1. Get the code:**
 
 ```bash
-git clone <repository-url> transaction-ledger-api
+git clone https://github.com/adiashishz/transaction-ledger-api.git
 cd transaction-ledger-api
 ```
 
