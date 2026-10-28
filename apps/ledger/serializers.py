@@ -55,6 +55,14 @@ class AccountSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "balance", "created_at"]
 
 
+class BalanceSerializer(serializers.ModelSerializer):
+    account_id = serializers.UUIDField(source="id", read_only=True)
+
+    class Meta:
+        model = Account
+        fields = ["account_id", "balance"]
+
+
 class TransactionCreateSerializer(StrictSerializer):
     unknown_field_messages = {
         "account_id": "account_id is taken from the URL.",

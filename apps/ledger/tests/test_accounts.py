@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from rest_framework.test import APITestCase
 
+from apps.ledger import services
 from apps.ledger.models import Account
 from apps.ledger.tests.helpers import ErrorAssertions
 
@@ -114,6 +115,42 @@ class GetAccountTests(ErrorAssertions, APITestCase):
             self.assert_error(response, 405, "METHOD_NOT_ALLOWED")
         self.account.refresh_from_db()
         self.assertEqual((self.account.name, self.account.balance), ("Aarav Sharma", Decimal("0.00")))
+
+
+class GetBalanceTests(ErrorAssertions, APITestCase):
+    def setUp(self):
+        self.account = Account.objects.create(name="Aarav Sharma")
+        self.url = f"{ACCOUNTS_URL}/{self.account.id}/balance"
+
+    def test_new_account_has_zero_balance(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"account_id": str(self.account.id), "balance": "0.00"})
+
+    def test_balance_reflects_transactions(self):
+        services.post_transaction(self.account.id, "credit", Decimal("250.00"), "REF-1")
+        services.post_transaction(self.account.id, "debit", Decimal("75.50"), "REF-2")
+        self.assertEqual(self.client.get(self.url).json()["balance"], "174.50")
+
+    def test_balance_is_unchanged_by_rejected_debit(self):
+        services.post_transaction(self.account.id, "credit", Decimal("100.00"), "REF-1")
+        self.client.post(
+            f"{ACCOUNTS_URL}/{self.account.id}/transactions",
+            {"type": "debit", "amount": "150.00", "reference_id": "REF-2"},
+        )
+        self.assertEqual(self.client.get(self.url).json()["balance"], "100.00")
+
+    def test_malformed_id_is_rejected(self):
+        self.assert_error(self.client.get(f"{ACCOUNTS_URL}/abc/balance"), 400, "INVALID_ACCOUNT_ID")
+
+    def test_unknown_id_is_not_found(self):
+        response = self.client.get(f"{ACCOUNTS_URL}/00000000-0000-4000-8000-000000000999/balance")
+        self.assert_error(response, 404, "ACCOUNT_NOT_FOUND")
+
+    def test_balance_cannot_be_written(self):
+        for response in [self.client.post(self.url, {"balance": 100}), self.client.put(self.url, {"balance": 100})]:
+            self.assert_error(response, 405, "METHOD_NOT_ALLOWED")
+        self.assertEqual(self.client.get(self.url).json()["balance"], "0.00")
 
 
 class AccountConstraintTests(APITestCase):

@@ -11,6 +11,7 @@ from apps.ledger.exceptions import InvalidAccountId
 from apps.ledger.serializers import (
     AccountCreateSerializer,
     AccountSerializer,
+    BalanceSerializer,
     ErrorResponseSerializer,
     TransactionCreateSerializer,
     TransactionSerializer,
@@ -52,6 +53,18 @@ class AccountDetailView(APIView):
     def get(self, request, account_id):
         account = services.get_account(parse_account_id(account_id))
         return Response(AccountSerializer(account).data)
+
+
+class AccountBalanceView(APIView):
+    @extend_schema(
+        tags=["Accounts"],
+        summary="Get an account's balance",
+        parameters=[ACCOUNT_ID_PARAMETER],
+        responses={200: BalanceSerializer, 400: ErrorResponseSerializer, 404: ErrorResponseSerializer},
+    )
+    def get(self, request, account_id):
+        account = services.get_account(parse_account_id(account_id))
+        return Response(BalanceSerializer(account).data)
 
 
 class AccountTransactionsView(APIView):
