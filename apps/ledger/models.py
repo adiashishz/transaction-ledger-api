@@ -30,7 +30,8 @@ class TransactionType(models.TextChoices):
 
 class Transaction(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name="transactions")
+    # No separate FK index: transaction_history_idx and the unique constraint both start with account_id.
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name="transactions", db_index=False)
     type = models.CharField(max_length=6, choices=TransactionType.choices)
     amount = models.DecimalField(max_digits=18, decimal_places=2)
     description = models.CharField(max_length=255, blank=True, default="")
