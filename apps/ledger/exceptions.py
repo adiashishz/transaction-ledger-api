@@ -41,6 +41,18 @@ class LedgerError(exceptions.APIException):
         self.details = details or {}
 
 
+class InvalidAccountId(LedgerError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    error_code = "INVALID_ACCOUNT_ID"
+    default_detail = "account_id must be a valid UUID."
+
+
+class AccountNotFound(LedgerError):
+    status_code = status.HTTP_404_NOT_FOUND
+    error_code = "ACCOUNT_NOT_FOUND"
+    default_detail = "Account not found."
+
+
 def exception_handler(exc, context):
     """DRF exception handler: reshape every error into the shared error body."""
     response = drf_exception_handler(exc, context)

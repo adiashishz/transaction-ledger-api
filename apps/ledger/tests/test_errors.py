@@ -1,19 +1,10 @@
-import json
-
 from django.test import RequestFactory, SimpleTestCase
 
 from apps.ledger.exceptions import server_error_handler
+from apps.ledger.tests.helpers import ErrorAssertions
 
 
-class ErrorShapeTests(SimpleTestCase):
-    def assert_error(self, response, status_code, code):
-        self.assertEqual(response.status_code, status_code)
-        self.assertEqual(response["Content-Type"], "application/json")
-        body = json.loads(response.content)
-        self.assertEqual(set(body), {"error"})
-        self.assertEqual(set(body["error"]), {"code", "message", "details"})
-        self.assertEqual(body["error"]["code"], code)
-
+class ErrorShapeTests(ErrorAssertions, SimpleTestCase):
     def test_unknown_route_returns_json_404(self):
         self.assert_error(self.client.get("/api/does-not-exist"), 404, "NOT_FOUND")
 
