@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 
 from apps.ledger import services
 from apps.ledger.models import Account
-from apps.ledger.tests.helpers import ErrorAssertions
+from apps.ledger.tests.helpers import ErrorAssertions, at_minute
 
 ACCOUNTS_URL = "/api/accounts"
 
@@ -73,7 +73,45 @@ class CreateAccountTests(ErrorAssertions, APITestCase):
         self.assert_error(response, 415, "UNSUPPORTED_MEDIA_TYPE")
 
     def test_other_methods_are_not_allowed(self):
-        self.assert_error(self.client.get(ACCOUNTS_URL), 405, "METHOD_NOT_ALLOWED")
+        for response in [self.client.put(ACCOUNTS_URL, {}), self.client.patch(ACCOUNTS_URL, {}), self.client.delete(ACCOUNTS_URL)]:
+            self.assert_error(response, 405, "METHOD_NOT_ALLOWED")
+
+
+class ListAccountsTests(ErrorAssertions, APITestCase):
+    def create_at(self, minute, name):
+        with at_minute(minute):
+            return Account.objects.create(name=name)
+
+    def test_empty_list(self):
+        response = self.client.get(ACCOUNTS_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"data": [], "pagination": {"page": 1, "limit": 10, "total_records": 0, "total_pages": 0}},
+        )
+
+    def test_lists_accounts_newest_first(self):
+        for minute, name in enumerate(["Aarav", "Priya", "Rohan"], start=1):
+            self.create_at(minute, name)
+        body = self.client.get(ACCOUNTS_URL).json()
+
+        self.assertEqual([account["name"] for account in body["data"]], ["Rohan", "Priya", "Aarav"])
+        self.assertEqual(set(body["data"][0]), {"id", "name", "balance", "created_at"})
+        self.assertEqual(body["pagination"]["total_records"], 3)
+
+    def test_paginates(self):
+        for minute in range(1, 6):
+            self.create_at(minute, f"Account {minute}")
+        body = self.client.get(ACCOUNTS_URL, {"page": 2, "limit": 2}).json()
+
+        self.assertEqual([account["name"] for account in body["data"]], ["Account 3", "Account 2"])
+        self.assertEqual(body["pagination"], {"page": 2, "limit": 2, "total_records": 5, "total_pages": 3})
+
+    def test_invalid_pagination_params(self):
+        for params, field in [({"page": 0}, "page"), ({"limit": 101}, "limit"), ({"limit": "x"}, "limit")]:
+            with self.subTest(params=params):
+                error = self.assert_error(self.client.get(ACCOUNTS_URL, params), 400, "VALIDATION_ERROR")
+                self.assertIn(field, error["details"])
 
 
 class GetAccountTests(ErrorAssertions, APITestCase):

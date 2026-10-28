@@ -14,6 +14,10 @@ def create_account(name):
     return Account.objects.create(name=name)
 
 
+def list_accounts():
+    return Account.objects.order_by("-created_at", "-id")
+
+
 def get_account(account_id, lock=False):
     """Fetch an account. `lock=True` takes a row lock (SELECT ... FOR UPDATE); it must run inside a transaction."""
     accounts = Account.objects.select_for_update() if lock else Account.objects
@@ -21,6 +25,14 @@ def get_account(account_id, lock=False):
     if account is None:
         raise AccountNotFound(details={"account_id": str(account_id)})
     return account
+
+
+def list_transactions(account_id, transaction_type=None):
+    """An account's transactions, newest first. `id` breaks created_at ties so pages stay stable."""
+    transactions = get_account(account_id).transactions.order_by("-created_at", "-id")
+    if transaction_type is not None:
+        transactions = transactions.filter(type=transaction_type)
+    return transactions
 
 
 def post_transaction(account_id, transaction_type, amount, reference_id, description=""):

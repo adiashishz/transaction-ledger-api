@@ -1,4 +1,13 @@
 import json
+from datetime import datetime, timedelta, timezone
+from unittest import mock
+
+BASE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def at_minute(minute):
+    """Pin `created_at` (auto_now_add reads timezone.now) so ordering tests don't depend on timing."""
+    return mock.patch("django.utils.timezone.now", return_value=BASE_TIME + timedelta(minutes=minute))
 
 
 class ErrorAssertions:

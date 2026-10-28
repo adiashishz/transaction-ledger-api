@@ -8,12 +8,17 @@ from rest_framework.views import APIView
 
 from apps.ledger import services
 from apps.ledger.exceptions import InvalidAccountId
+from apps.ledger.pagination import paginate
 from apps.ledger.serializers import (
     AccountCreateSerializer,
+    AccountPageSerializer,
     AccountSerializer,
     BalanceSerializer,
     ErrorResponseSerializer,
+    HistoryQuerySerializer,
+    PageQuerySerializer,
     TransactionCreateSerializer,
+    TransactionPageSerializer,
     TransactionSerializer,
 )
 
@@ -28,7 +33,26 @@ def parse_account_id(raw):
         raise InvalidAccountId(details={"account_id": raw})
 
 
-class AccountCreateView(APIView):
+def validate_query(serializer_class, request):
+    serializer = serializer_class(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
+
+
+class AccountListCreateView(APIView):
+    @extend_schema(
+        tags=["Accounts"],
+        operation_id="accounts_list",
+        summary="List accounts",
+        description="All accounts, newest first, paginated with `page` and `limit`.",
+        parameters=[PageQuerySerializer],
+        responses={200: AccountPageSerializer, 400: ErrorResponseSerializer},
+    )
+    def get(self, request):
+        query = validate_query(PageQuerySerializer, request)
+        accounts, pagination = paginate(services.list_accounts(), query["page"], query["limit"])
+        return Response(AccountPageSerializer({"data": accounts, "pagination": pagination}).data)
+
     @extend_schema(
         tags=["Accounts"],
         summary="Create an account",
@@ -68,6 +92,21 @@ class AccountBalanceView(APIView):
 
 
 class AccountTransactionsView(APIView):
+    @extend_schema(
+        tags=["Transactions"],
+        operation_id="accounts_transactions_list",
+        summary="List an account's transactions",
+        description="Newest first. Filter with `type`; paginate with `page` and `limit`.",
+        parameters=[ACCOUNT_ID_PARAMETER, HistoryQuerySerializer],
+        responses={200: TransactionPageSerializer, 400: ErrorResponseSerializer, 404: ErrorResponseSerializer},
+    )
+    def get(self, request, account_id):
+        account_id = parse_account_id(account_id)
+        query = validate_query(HistoryQuerySerializer, request)
+        transactions = services.list_transactions(account_id, query.get("type"))
+        items, pagination = paginate(transactions, query["page"], query["limit"])
+        return Response(TransactionPageSerializer({"data": items, "pagination": pagination}).data)
+
     @extend_schema(
         tags=["Transactions"],
         summary="Add a credit or debit",

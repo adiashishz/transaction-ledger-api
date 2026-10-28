@@ -4,6 +4,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from apps.ledger.models import Account, Transaction, TransactionType
+from apps.ledger.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 
 class StrictCharField(serializers.CharField):
@@ -88,6 +89,34 @@ class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
         fields = ["id", "account_id", "type", "amount", "description", "reference_id", "created_at"]
+
+
+class PageQuerySerializer(serializers.Serializer):
+    page = serializers.IntegerField(min_value=1, default=1)
+    limit = serializers.IntegerField(min_value=1, max_value=MAX_PAGE_SIZE, default=DEFAULT_PAGE_SIZE)
+
+
+class HistoryQuerySerializer(PageQuerySerializer):
+    type = serializers.ChoiceField(
+        choices=TransactionType.choices, required=False, help_text="Omit to return both credits and debits."
+    )
+
+
+class PaginationSerializer(serializers.Serializer):
+    page = serializers.IntegerField()
+    limit = serializers.IntegerField()
+    total_records = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+
+
+class AccountPageSerializer(serializers.Serializer):
+    data = AccountSerializer(many=True)
+    pagination = PaginationSerializer()
+
+
+class TransactionPageSerializer(serializers.Serializer):
+    data = TransactionSerializer(many=True)
+    pagination = PaginationSerializer()
 
 
 class ErrorDetailSerializer(serializers.Serializer):
