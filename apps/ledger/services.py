@@ -3,8 +3,8 @@
 from django.db import IntegrityError, transaction
 from django.db.models import F
 
-from apps.ledger.exceptions import AccountNotFound, DuplicateTransaction, InsufficientBalance
-from apps.ledger.models import Account, Transaction, TransactionType
+from apps.ledger.exceptions import AccountNotFound, BalanceLimitExceeded, DuplicateTransaction, InsufficientBalance
+from apps.ledger.models import MAX_BALANCE, Account, Transaction, TransactionType
 from apps.ledger.serializers import TransactionSerializer
 
 UNIQUE_REFERENCE_CONSTRAINT = "uniq_transaction_account_reference"
@@ -52,6 +52,8 @@ def post_transaction(account_id, transaction_type, amount, reference_id, descrip
 
             if transaction_type == TransactionType.DEBIT and account.balance < amount:
                 raise _insufficient_balance(account.balance, amount)
+            if transaction_type == TransactionType.CREDIT and account.balance + amount > MAX_BALANCE:
+                raise _balance_limit_exceeded(account.balance, amount)
 
             txn = Transaction.objects.create(
                 account=account,
@@ -81,6 +83,12 @@ def _apply_balance_change(account, delta):
 def _insufficient_balance(balance, amount):
     return InsufficientBalance(
         details={"balance": f"{balance:.2f}", "requested": f"{amount:.2f}", "shortfall": f"{amount - balance:.2f}"},
+    )
+
+
+def _balance_limit_exceeded(balance, amount):
+    return BalanceLimitExceeded(
+        details={"balance": f"{balance:.2f}", "requested": f"{amount:.2f}", "max_balance": f"{MAX_BALANCE:.2f}"},
     )
 
 

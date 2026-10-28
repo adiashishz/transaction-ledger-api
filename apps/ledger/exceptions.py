@@ -5,6 +5,7 @@
 
 import logging
 
+from django.core.exceptions import RequestDataTooBig
 from django.http import JsonResponse
 from rest_framework import exceptions, status
 from rest_framework.response import Response
@@ -65,8 +66,22 @@ class InsufficientBalance(LedgerError):
     default_detail = "Insufficient funds."
 
 
+class BalanceLimitExceeded(LedgerError):
+    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_code = "BALANCE_LIMIT_EXCEEDED"
+    default_detail = "This credit would exceed the maximum account balance."
+
+
+class PayloadTooLarge(LedgerError):
+    status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    error_code = "PAYLOAD_TOO_LARGE"
+    default_detail = "Request body is too large."
+
+
 def exception_handler(exc, context):
     """DRF exception handler: reshape every error into the shared error body."""
+    if isinstance(exc, RequestDataTooBig):
+        exc = PayloadTooLarge()
     response = drf_exception_handler(exc, context)
 
     if response is None:

@@ -5,7 +5,7 @@ from django.db import IntegrityError, transaction
 from rest_framework.test import APITestCase
 
 from apps.ledger import services
-from apps.ledger.models import Account, Transaction
+from apps.ledger.models import MAX_BALANCE, Account, Transaction
 from apps.ledger.tests.helpers import ErrorAssertions
 
 
@@ -87,6 +87,26 @@ class InsufficientBalanceTests(TransactionTestCase):
         self.assertEqual(self.post("credit", "50.00", "REF-1").status_code, 201)
 
 
+class BalanceLimitTests(TransactionTestCase):
+    def setUp(self):
+        self.account = Account.objects.create(name="Whale", balance=MAX_BALANCE - Decimal("1.00"))
+        self.url = transactions_url(self.account.id)
+
+    def test_credit_up_to_the_maximum_is_allowed(self):
+        self.assertEqual(self.post("credit", "1.00").status_code, 201)
+        self.assertEqual(self.balance(), MAX_BALANCE)
+
+    def test_credit_beyond_the_maximum_is_rejected(self):
+        error = self.assert_error(self.post("credit", "1.01"), 422, "BALANCE_LIMIT_EXCEEDED")
+
+        self.assertEqual(error["details"]["max_balance"], "9999999999999999.99")
+        self.assertEqual(self.balance(), MAX_BALANCE - Decimal("1.00"))
+        self.assertEqual(Transaction.objects.count(), 0)
+
+    def test_debits_are_unaffected_by_the_limit(self):
+        self.assertEqual(self.post("debit", "5.00").status_code, 201)
+
+
 class DuplicateTransactionTests(TransactionTestCase):
     def test_same_reference_id_is_rejected_and_returns_original(self):
         original = self.post("credit", "100.00", "REF-1").json()
@@ -145,6 +165,23 @@ class TransactionValidationTests(TransactionTestCase):
         for value in [0, "0.00", -5, "-0.01", "abc", "", None, True, "NaN", "Infinity", "10.001", 10_000_000_000]:
             with self.subTest(amount=value):
                 self.assert_field_error(self.valid_payload(amount=value), "amount")
+
+    def test_amount_string_must_be_a_plain_decimal(self):
+        for value in ["1e2", "1E-2", "+5", " 7 ", ".5", "5.", "1_000", "١٠", "10,00", "₹10", "0x10"]:
+            with self.subTest(amount=value):
+                error = self.assert_error(self.client.post(self.url, self.valid_payload(amount=value)), 400, "VALIDATION_ERROR")
+                self.assertEqual(error["details"], {"amount": ["Amount must be a plain decimal like 100 or 100.50."]})
+
+    def test_amount_messages_stay_specific(self):
+        cases = {
+            "-10.00": "Amount must be greater than 0.",
+            "10.001": "Ensure that there are no more than 2 decimal places.",
+            "12345678901": "Ensure that there are no more than 10 digits before the decimal point.",
+        }
+        for value, message in cases.items():
+            with self.subTest(amount=value):
+                error = self.assert_error(self.client.post(self.url, self.valid_payload(amount=value)), 400, "VALIDATION_ERROR")
+                self.assertEqual(error["details"], {"amount": [message]})
 
     def test_invalid_reference_id(self):
         for value in ["", "   ", None, 123, "x" * 101]:

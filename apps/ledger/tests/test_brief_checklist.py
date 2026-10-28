@@ -90,3 +90,61 @@ class BriefValidationTests(BriefChecklistTestCase):
         not_json = self.client.post(self.url, data="type=credit", content_type="application/x-www-form-urlencoded")
         self.assert_error(not_json, 415, "UNSUPPORTED_MEDIA_TYPE")
         self.assert_nothing_changed()
+
+
+class BriefErrorHandlingTests(BriefChecklistTestCase):
+    """Brief section 8: Error handling, with proper status codes and consistent, understandable bodies."""
+
+    def assert_understandable(self, response, status_code, code):
+        error = self.assert_error(response, status_code, code)
+        self.assertTrue(error["message"].strip(), "message must not be empty")
+        self.assertIsInstance(error["details"], dict)
+        return error
+
+    def test_account_not_found(self):
+        for path in ["", "/balance", "/transactions"]:
+            with self.subTest(path=path):
+                response = self.client.get(f"/api/accounts/{UNKNOWN_ID}{path}")
+                error = self.assert_understandable(response, 404, "ACCOUNT_NOT_FOUND")
+                self.assertEqual(error["details"], {"account_id": UNKNOWN_ID})
+
+    def test_invalid_transaction_type(self):
+        error = self.assert_understandable(self.post_transaction(type="refund"), 400, "VALIDATION_ERROR")
+        self.assertEqual(error["details"], {"type": ['"refund" is not a valid choice.']})
+
+    def test_invalid_amount(self):
+        cases = {
+            "abc": "Amount must be a plain decimal like 100 or 100.50.",
+            "1e2": "Amount must be a plain decimal like 100 or 100.50.",
+            "-1": "Amount must be greater than 0.",
+            "1.001": "Ensure that there are no more than 2 decimal places.",
+        }
+        for amount, message in cases.items():
+            with self.subTest(amount=amount):
+                error = self.assert_understandable(self.post_transaction(amount=amount), 400, "VALIDATION_ERROR")
+                self.assertEqual(error["details"], {"amount": [message]})
+
+    def test_insufficient_balance(self):
+        response = self.post_transaction(type="debit", amount="80.00")
+        error = self.assert_understandable(response, 422, "INSUFFICIENT_BALANCE")
+        self.assertEqual(error["message"], "Insufficient funds.")
+        self.assertEqual(error["details"], {"balance": "50.00", "requested": "80.00", "shortfall": "30.00"})
+
+    def test_duplicate_transaction(self):
+        error = self.assert_understandable(self.post_transaction(reference_id="REF-1"), 409, "DUPLICATE_TRANSACTION")
+        self.assertIn("REF-1", error["message"])
+        self.assertEqual(error["details"]["transaction"]["reference_id"], "REF-1")
+
+    def test_invalid_pagination_parameters(self):
+        for url in [self.url, "/api/accounts"]:
+            for params, field in [({"page": 0}, "page"), ({"limit": 1000}, "limit"), ({"page": "x"}, "page")]:
+                with self.subTest(url=url, params=params):
+                    error = self.assert_understandable(self.client.get(url, params), 400, "VALIDATION_ERROR")
+                    self.assertIn(field, error["details"])
+
+    def test_invalid_request_body(self):
+        empty = self.assert_understandable(self.client.post(self.url, {}), 400, "VALIDATION_ERROR")
+        self.assertEqual(set(empty["details"]), {"type", "amount", "reference_id"})
+        malformed = self.client.post(self.url, data="{not json", content_type="application/json")
+        self.assert_understandable(malformed, 400, "MALFORMED_JSON")
+        self.assert_nothing_changed()

@@ -1,3 +1,4 @@
+import re
 from collections.abc import Mapping
 from decimal import Decimal
 
@@ -15,6 +16,30 @@ class StrictCharField(serializers.CharField):
     def to_internal_value(self, data):
         if not isinstance(data, str):
             self.fail("not_a_string")
+        return super().to_internal_value(data)
+
+
+class AmountField(serializers.DecimalField):
+    """A positive money amount with at most 2 decimal places, sent as a JSON number or a plain decimal string.
+
+    Strings must look like `100` or `100.50`. Python's Decimal() would also accept forms such as `1e2`,
+    `+5`, ` 7 `, `1_000` or non-ASCII digits; none of those are sensible ways to write money, so they
+    are rejected. Precision, size and sign are left to DecimalField so their messages stay specific.
+    """
+
+    PLAIN_DECIMAL = re.compile(r"-?[0-9]+(\.[0-9]+)?")
+    default_error_messages = {
+        "format": "Amount must be a plain decimal like 100 or 100.50.",
+        "min_value": "Amount must be greater than 0.",
+    }
+
+    def __init__(self, **kwargs):
+        # 12 digits caps a single amount at 9,999,999,999.99, far below the balance column's limit.
+        super().__init__(max_digits=12, decimal_places=2, min_value=Decimal("0.01"), **kwargs)
+
+    def to_internal_value(self, data):
+        if isinstance(data, str) and not self.PLAIN_DECIMAL.fullmatch(data):
+            self.fail("format")
         return super().to_internal_value(data)
 
 
@@ -72,13 +97,7 @@ class TransactionCreateSerializer(StrictSerializer):
     }
 
     type = serializers.ChoiceField(choices=TransactionType.choices)
-    # 12 digits caps a single transaction at 9,999,999,999.99, far below the balance column's limit.
-    amount = serializers.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        min_value=Decimal("0.01"),
-        error_messages={"min_value": "Amount must be greater than 0."},
-    )
+    amount = AmountField()
     reference_id = StrictCharField(max_length=100)
     description = StrictCharField(max_length=255, required=False, allow_blank=True, default="")
 
