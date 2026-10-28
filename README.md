@@ -5,43 +5,55 @@ A REST API for a simple transaction ledger. You can create accounts, post credit
 ## Requirements
 
 - Python 3.12 or newer
-- PostgreSQL 14 or newer, running locally
+- PostgreSQL 14 or newer, **or** Docker to run PostgreSQL in a container
 
 ## Run it locally
 
 Run these in order from a terminal.
 
-**1. Create the database user and database** (one time only):
-
-```bash
-sudo -u postgres psql -c "CREATE ROLE ledger WITH LOGIN PASSWORD 'ledger' CREATEDB;"
-sudo -u postgres psql -c "CREATE DATABASE ledger OWNER ledger;"
-```
-
-On macOS or Windows, run the two SQL statements in `psql` as your Postgres superuser instead. `CREATEDB` lets the test runner create its own test database.
-
-**2. Get the code:**
+**1. Get the code:**
 
 ```bash
 git clone <repository-url> transaction-ledger-api
 cd transaction-ledger-api
 ```
 
-**3. Create a virtual environment and install the dependencies:**
+**2. Create your `.env` file:**
+
+```bash
+cp .env.example .env               # Windows: copy .env.example .env
+```
+
+The defaults work as they are with either option in step 3.
+
+**3. Start PostgreSQL.** Pick one option:
+
+- **A. With Docker** (no PostgreSQL install needed):
+
+  ```bash
+  docker compose up -d --wait
+  ```
+
+  This starts PostgreSQL 17 using the database name, user and password from `.env`, and waits until it's ready. Data is kept in a Docker volume between runs.
+  - `docker compose down` stops it.
+  - `docker compose down -v` stops it and deletes the data.
+
+- **B. With your own PostgreSQL:** create the user and database once:
+
+  ```bash
+  sudo -u postgres psql -c "CREATE ROLE ledger WITH LOGIN PASSWORD 'ledger' CREATEDB;"
+  sudo -u postgres psql -c "CREATE DATABASE ledger OWNER ledger;"
+  ```
+
+  On macOS or Windows, run the two SQL statements in `psql` as your Postgres superuser instead. `CREATEDB` lets the test runner create its own test database.
+
+**4. Create a virtual environment and install the dependencies:**
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
-
-**4. Create your `.env` file:**
-
-```bash
-cp .env.example .env               # Windows: copy .env.example .env
-```
-
-The default values match step 1. If your database runs elsewhere, edit the `DB_*` values in `.env`.
 
 **5. Create the tables:**
 
@@ -135,11 +147,13 @@ apps/ledger/
   management/commands/      The seed command
   tests/                    Test suite
 docs/                       API reference and assumptions
+docker-compose.yml          Optional PostgreSQL container
 ```
 
 ## Troubleshooting
 
 - **Port 8000 is busy:** run `python manage.py runserver 8001` and use port 8001 in the URLs above.
+- **`docker compose up` fails with "address already in use" or "port is already allocated":** something else, usually a local PostgreSQL, is already using port 5432. Set `DB_PORT=5433` (or any free port) in `.env` and run the command again. Docker and Django both read that value.
 - **`migrate` fails with "password authentication failed" or "Ident authentication failed":** your PostgreSQL only allows OS-user logins over TCP. Change `ident` or `peer` to `scram-sha-256` on the `host` lines of `pg_hba.conf`, then restart PostgreSQL.
 
 ## Documentation

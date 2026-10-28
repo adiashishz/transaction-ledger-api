@@ -1,0 +1,23 @@
+# Optional: runs PostgreSQL for local development, for anyone without it installed.
+# The API itself runs natively (see README). Credentials come from the same DB_* values in .env
+# that Django uses, so both always agree. The postgres user is a superuser, so `manage.py test`
+# can create its test database.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-ledger}
+      POSTGRES_USER: ${DB_USER:-ledger}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ledger}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  pgdata:
