@@ -1,13 +1,15 @@
 import uuid
 
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.ledger import services
 from apps.ledger.exceptions import InvalidAccountId
+from apps.ledger.management.commands.seed import ACCOUNTS as SEEDED_ACCOUNTS
+from apps.ledger.management.commands.seed import PRIYA, ROHAN
 from apps.ledger.pagination import paginate
 from apps.ledger.serializers import (
     AccountCreateSerializer,
@@ -24,7 +26,32 @@ from apps.ledger.serializers import (
     TransferSerializer,
 )
 
-ACCOUNT_ID_PARAMETER = OpenApiParameter("account_id", OpenApiTypes.UUID, OpenApiParameter.PATH)
+# Swagger "Try it out" offers the seeded accounts (`python manage.py seed`) as ready-made ids.
+ACCOUNT_ID_PARAMETER = OpenApiParameter(
+    "account_id",
+    OpenApiTypes.UUID,
+    OpenApiParameter.PATH,
+    examples=[OpenApiExample(f"{name} (seeded)", value=account_id) for account_id, name in SEEDED_ACCOUNTS],
+)
+TRANSACTION_EXAMPLES = [
+    OpenApiExample(
+        "Credit",
+        request_only=True,
+        value={"type": "credit", "amount": "500.00", "reference_id": "INV-1001", "description": "Invoice 1001"},
+    ),
+    OpenApiExample("Debit", request_only=True, value={"type": "debit", "amount": "120.50", "reference_id": "PAY-2001"}),
+]
+TRANSFER_EXAMPLE = OpenApiExample(
+    "Priya → Rohan (seeded)",
+    request_only=True,
+    value={
+        "from_account_id": PRIYA,
+        "to_account_id": ROHAN,
+        "amount": "25.00",
+        "reference_id": "TRF-1001",
+        "description": "Lunch split",
+    },
+)
 
 
 def parse_account_id(raw):
@@ -46,7 +73,10 @@ class AccountListCreateView(APIView):
         tags=["Accounts"],
         operation_id="accounts_list",
         summary="List accounts",
-        description="All accounts, newest first, paginated with `page` and `limit`.",
+        description=(
+            "All accounts, newest first, paginated with `page` and `limit`. Not in the brief: added so an "
+            "account can be found again when its id wasn't kept from the create response."
+        ),
         parameters=[PageQuerySerializer],
         responses={200: AccountPageSerializer, 400: ErrorResponseSerializer},
     )
@@ -60,6 +90,7 @@ class AccountListCreateView(APIView):
         summary="Create an account",
         description="Creates an account with a zero balance. Only `name` may be sent.",
         request=AccountCreateSerializer,
+        examples=[OpenApiExample("New account", request_only=True, value={"name": "Kavya Nair"})],
         responses={201: AccountSerializer, 400: ErrorResponseSerializer, 415: ErrorResponseSerializer},
     )
     def post(self, request):
@@ -73,6 +104,10 @@ class AccountDetailView(APIView):
     @extend_schema(
         tags=["Accounts"],
         summary="Get an account",
+        description=(
+            "The full account, including `name` and `created_at`. Not in the brief: the balance endpoint "
+            "returns only `account_id` and `balance`, so this is how a client confirms whose account an id is."
+        ),
         parameters=[ACCOUNT_ID_PARAMETER],
         responses={200: AccountSerializer, 400: ErrorResponseSerializer, 404: ErrorResponseSerializer},
     )
@@ -119,6 +154,7 @@ class AccountTransactionsView(APIView):
         ),
         parameters=[ACCOUNT_ID_PARAMETER],
         request=TransactionCreateSerializer,
+        examples=TRANSACTION_EXAMPLES,
         responses={
             201: TransactionSerializer,
             400: ErrorResponseSerializer,
@@ -154,6 +190,7 @@ class TransferCreateView(APIView):
             "unique per source account, and must not already be used on either account."
         ),
         request=TransferCreateSerializer,
+        examples=[TRANSFER_EXAMPLE],
         responses={
             201: TransferSerializer,
             400: ErrorResponseSerializer,
