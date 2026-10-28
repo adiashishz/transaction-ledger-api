@@ -21,3 +21,33 @@ class Account(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.id})"
+
+
+class TransactionType(models.TextChoices):
+    CREDIT = "credit", "Credit"
+    DEBIT = "debit", "Debit"
+
+
+class Transaction(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name="transactions")
+    type = models.CharField(max_length=6, choices=TransactionType.choices)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    description = models.CharField(max_length=255, blank=True, default="")
+    reference_id = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["account", "reference_id"], name="uniq_transaction_account_reference"),
+            models.CheckConstraint(condition=Q(type__in=TransactionType.values), name="transaction_type_valid"),
+            models.CheckConstraint(condition=Q(amount__gt=0), name="transaction_amount_positive"),
+            models.CheckConstraint(condition=~Q(reference_id__regex=r"^\s*$"), name="transaction_reference_not_blank"),
+        ]
+        indexes = [
+            # Serves the history query: one account, newest first.
+            models.Index(fields=["account", "-created_at", "-id"], name="transaction_history_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.type} {self.amount} on {self.account_id} ({self.reference_id})"

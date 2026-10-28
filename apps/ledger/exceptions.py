@@ -53,6 +53,18 @@ class AccountNotFound(LedgerError):
     default_detail = "Account not found."
 
 
+class DuplicateTransaction(LedgerError):
+    status_code = status.HTTP_409_CONFLICT
+    error_code = "DUPLICATE_TRANSACTION"
+    default_detail = "A transaction with this reference_id already exists for this account."
+
+
+class InsufficientBalance(LedgerError):
+    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_code = "INSUFFICIENT_BALANCE"
+    default_detail = "Insufficient funds."
+
+
 def exception_handler(exc, context):
     """DRF exception handler: reshape every error into the shared error body."""
     response = drf_exception_handler(exc, context)
